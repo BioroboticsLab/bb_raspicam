@@ -27,7 +27,7 @@ class Background:
             self.initialized = True
         else:
             # total amount of image difference to background
-            changedpx=np.sum(np.abs(self.background - img))
+            changedpx=np.sum(np.abs(self.background - img))/bg_pixels
             #print(self.background)
             print(changedpx)
             if changedpx < self.threshold:
@@ -44,12 +44,17 @@ class Background:
 config = configparser.ConfigParser()
 config.read("raspicam.cfg")
 
-bg = Background(float(config['Background']['alpha']), int(config['Background']['threshold']),int(config['Background']['delay']))
 
 MAX_WIDTH = 2592	
 MAX_HEIGHT = 1944
 cam_width = float(config['Recording']['zoom_w']) * MAX_WIDTH
 cam_height = float(config['Recording']['zoom_h']) * MAX_HEIGHT
+bg_scale_factor = float(config['Background']['scale_factor'])
+bg_width = round((cam_width*bg_scale_factor)/32)*32
+bg_height = round((cam_height*bg_scale_factor)/16)*16
+bg_pixels = bg_width*bg_height
+
+bg = Background(float(config['Background']['alpha']), int(config['Background']['threshold']),int(config['Background']['delay']))
 
 
 with PiCamera(sensor_mode = 2) as cam:
@@ -72,13 +77,13 @@ with PiCamera(sensor_mode = 2) as cam:
     last_split=time.time()
     still=None
     filename=""
-    with array.PiRGBArray(cam,size=(int(cam_width),int(cam_height))) as output:
-        cam.capture(output, 'rgb', use_video_port=True, resize=(int(cam_width),int(cam_height)))
+    with array.PiRGBArray(cam,size=(int(bg_width),int(bg_height))) as output:
+        cam.capture(output, 'rgb', use_video_port=True, resize=(int(bg_width),int(bg_height)))
         still = output.array[:,:,0]
         time.sleep(5)
         output.truncate(0)
         while True:
-            cam.capture(output, 'rgb', use_video_port=True, resize=(int(cam_width),int(cam_height)))
+            cam.capture(output, 'rgb', use_video_port=True, resize=(int(bg_width),int(bg_height)))
             still = output.array[:,:,0]
             bg.update_bg(still)
             output.truncate(0)
@@ -101,8 +106,8 @@ with PiCamera(sensor_mode = 2) as cam:
                 os.rename(filename, config['Recording']['video_dir']+"/"+filename)
                 filename=filename_new
             if recording:
-                cam.wait_recording(int(config['Background']['bg_time']))
+                cam.wait_recording(float(config['Background']['bg_time']))
             else:
-                time.sleep(int(config['Background']['bg_time']))
+                time.sleep(float(config['Background']['bg_time']))
         cam.stop_recording()
     cam.stop_preview()
