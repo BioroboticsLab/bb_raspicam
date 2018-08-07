@@ -27,10 +27,15 @@ class Background:
             self.initialized = True
         else:
             # total amount of image difference to background
-            changedpx=np.sum(np.abs(self.background - img))/bg_pixels
-            #print(self.background)
+            #changedpx = np.sum( np.abs(self.background - img) ) / bg_pixels
+            
+            # count the number of pixels whose difference to the background is greater than the threshold
+            # this is supposed to be more stable with varying lighting conditions
+            changedpx = np.sum( np.where( np.abs(self.background - img) > self.threshold) ) / bg_pixels
+            
             print(changedpx)
-            if changedpx < self.threshold:
+            
+            if changedpx < area_threshold:
                 self.active = False
             else:
                 self.active = True
@@ -44,9 +49,10 @@ class Background:
 config = configparser.ConfigParser()
 config.read("raspicam.cfg")
 
-
-MAX_WIDTH = 2592	
-MAX_HEIGHT = 1944
+cam_mode = int(config['Recording']['sensor_mode'])
+print(cam_mode)
+MAX_WIDTH = float(config['Recording']['sensor_width'])	
+MAX_HEIGHT = float(config['Recording']['sensor_height'])
 cam_width = float(config['Recording']['zoom_w']) * MAX_WIDTH
 cam_height = float(config['Recording']['zoom_h']) * MAX_HEIGHT
 bg_scale_factor = float(config['Background']['scale_factor'])
@@ -54,22 +60,25 @@ bg_width = round((cam_width*bg_scale_factor)/32)*32
 bg_height = round((cam_height*bg_scale_factor)/16)*16
 bg_pixels = bg_width*bg_height
 
-bg = Background(float(config['Background']['alpha']), int(config['Background']['threshold']),int(config['Background']['delay']))
+bg = Background(float(config['Background']['alpha']), int(config['Background']['diff_threshold']),int(config['Background']['delay']))
+area_threshold = float(config['Background']['area_threshold'])
 
-
-with PiCamera(sensor_mode = 2) as cam:
+with PiCamera(sensor_mode = cam_mode) as cam:
     cam.framerate = int(config['Recording']['framerate'])
     cam.zoom = (float(config['Recording']['zoom_x']),float(config['Recording']['zoom_y']),float(config['Recording']['zoom_w']),float(config['Recording']['zoom_h']))
     cam.exposure_compensation = int(config['Recording']['exposure_compensation'])
-    #cam.resolution=(1920,1080)
+    
     cam.color_effects=(128,128)
     
     # window parameter doesnt work as API says. window remains small and position is changed with different widths and heights
     #cam.start_preview(fullscreen=False, window=(0, 0, int(cam_width/2), int(cam_height/2)))
     cam.start_preview(fullscreen=False, window=(0, 0, 640, 480))
-    cam.exposure_mode = 'off'
-    cam.awb_mode = 'off'
-    cam.shutter_speed = 5*1000
+
+    print('auto', len(config['Recording']['exposure_mode']))
+    cam.exposure_mode = str(config['Recording']['exposure_mode'])
+    #str(config['Recording']['exposure_mode'])
+    cam.awb_mode = config['Recording']['awb_mode']
+    cam.shutter_speed = int(config['Recording']['shutter_speed'])
     
     #time.sleep(20)
     recording = False
