@@ -4,6 +4,7 @@ import datetime
 import configparser
 import os
 import numpy as np
+from gpiozero import LED
 
 # background accumulation via exponential average
 class Background:
@@ -63,6 +64,9 @@ bg_pixels = bg_width*bg_height
 bg = Background(float(config['Background']['alpha']), int(config['Background']['diff_threshold']),int(config['Background']['delay']))
 area_threshold = float(config['Background']['area_threshold'])
 
+led_green = LED(16)
+led_yellow = LED(20)
+
 with PiCamera(sensor_mode = cam_mode) as cam:
     cam.framerate = int(config['Recording']['framerate'])
     cam.zoom = (float(config['Recording']['zoom_x']),float(config['Recording']['zoom_y']),float(config['Recording']['zoom_w']),float(config['Recording']['zoom_h']))
@@ -93,15 +97,21 @@ with PiCamera(sensor_mode = cam_mode) as cam:
         output.truncate(0)
         while True:
             cam.capture(output, 'rgb', use_video_port=True, resize=(int(bg_width),int(bg_height)))
+            
+            # tell world we're still alive
+            led_green.toggle() 
+            
             still = output.array[:,:,0]
             bg.update_bg(still)
             output.truncate(0)
             if (not bg.is_active()) and recording:
+                led_yellow.off()
                 print('move file')
                 os.rename(filename, config['Recording']['video_dir']+"/"+filename)
                 cam.stop_recording()
                 recording=False
             elif bg.is_active() and not recording:
+                led_yellow.on()
                 print('start recording')
                 filename=config['General']['feeder_id']+'_'+datetime.datetime.utcnow().strftime("%Y-%m-%d-%H-%M-%S")+'.h264'
                 cam.start_recording(filename, resize=(int(cam_width),int(cam_height)), quality=20)
