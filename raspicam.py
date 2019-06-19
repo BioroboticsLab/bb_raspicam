@@ -13,13 +13,15 @@ class Background:
     # alpha     : 
     # threshold :
     # delay     :
-    def __init__(self, alpha, threshold, delay):
+    def __init__(self, alpha, threshold, area_threshold, delay, background_width, background_height):
         self.alpha = alpha
         self.active = False
         self.threshold = threshold
+        self.area_threshold = area_threshold
         self.initialized = False
         self.last_active = time.time()
         self.delay = delay
+        self.total_background_pixels = background_width * background_height
     
     # called every frame to update background hypothesis
     def update_bg(self,img):
@@ -32,11 +34,11 @@ class Background:
             
             # count the number of pixels whose difference to the background is greater than the threshold
             # this is supposed to be more stable with varying lighting conditions
-            changedpx = np.sum( np.where( np.abs(self.background - img) > self.threshold) ) / bg_pixels
+            changedpx = np.sum( np.where( np.abs(self.background - img) > self.threshold) ) / self.total_background_pixels
             
             print(changedpx)
             
-            if changedpx < area_threshold:
+            if changedpx < self.area_threshold:
                 self.active = False
             else:
                 self.active = True
@@ -47,86 +49,99 @@ class Background:
     def is_active(self):
         return time.time() - self.last_active < self.delay
 
-config = configparser.ConfigParser()
-config.read("raspicam.cfg")
+def run_camera(config_file_name):
+    config = configparser.ConfigParser()
+    config.read(config_file_name)
 
-cam_mode = int(config['Recording']['sensor_mode'])
-print(cam_mode)
-MAX_WIDTH = float(config['Recording']['sensor_width'])	
-MAX_HEIGHT = float(config['Recording']['sensor_height'])
-cam_width = float(config['Recording']['zoom_w']) * MAX_WIDTH
-cam_height = float(config['Recording']['zoom_h']) * MAX_HEIGHT
-bg_scale_factor = float(config['Background']['scale_factor'])
-bg_width = round((cam_width*bg_scale_factor)/32)*32
-bg_height = round((cam_height*bg_scale_factor)/16)*16
-bg_pixels = bg_width*bg_height
+    cam_mode = int(config['Recording']['sensor_mode'])
+    print(cam_mode)
+    MAX_WIDTH = float(config['Recording']['sensor_width'])	
+    MAX_HEIGHT = float(config['Recording']['sensor_height'])
+    cam_width = float(config['Recording']['zoom_w']) * MAX_WIDTH
+    cam_height = float(config['Recording']['zoom_h']) * MAX_HEIGHT
+    bg_scale_factor = float(config['Background']['scale_factor'])
+    bg_width = round((cam_width*bg_scale_factor)/32)*32
+    bg_height = round((cam_height*bg_scale_factor)/16)*16
 
-bg = Background(float(config['Background']['alpha']), int(config['Background']['diff_threshold']),int(config['Background']['delay']))
-area_threshold = float(config['Background']['area_threshold'])
+    bg = Background(float(config['Background']['alpha']),
+                    int(config['Background']['diff_threshold']),
+                    float(config['Background']['area_threshold']),
+                    int(config['Background']['delay']),
+                    bg_width, bg_height)
 
-led_green = LED(16)
-led_yellow = LED(20)
+    led_green = LED(16)
+    led_yellow = LED(20)
 
-with PiCamera(sensor_mode = cam_mode) as cam:
-    cam.framerate = int(config['Recording']['framerate'])
-    cam.zoom = (float(config['Recording']['zoom_x']),float(config['Recording']['zoom_y']),float(config['Recording']['zoom_w']),float(config['Recording']['zoom_h']))
-    cam.exposure_compensation = int(config['Recording']['exposure_compensation'])
-    
-    cam.color_effects=(128,128)
-    
-    # window parameter doesnt work as API says. window remains small and position is changed with different widths and heights
-    #cam.start_preview(fullscreen=False, window=(0, 0, int(cam_width/2), int(cam_height/2)))
-    cam.start_preview(fullscreen=False, window=(0, 0, 640, 480))
+    with PiCamera(sensor_mode = cam_mode) as cam:
+        cam.framerate = int(config['Recording']['framerate'])
+        cam.zoom = (float(config['Recording']['zoom_x']),float(config['Recording']['zoom_y']),float(config['Recording']['zoom_w']),float(config['Recording']['zoom_h']))
+        cam.exposure_compensation = int(config['Recording']['exposure_compensation'])
+        
+        cam.color_effects=(128,128)
+        
+        # window parameter doesnt work as API says. window remains small and position is changed with different widths and heights
+        #cam.start_preview(fullscreen=False, window=(0, 0, int(cam_width/2), int(cam_height/2)))
+        cam.start_preview(fullscreen=False, window=(0, 0, 640, 480))
 
-    print('auto', len(config['Recording']['exposure_mode']))
-    cam.exposure_mode = str(config['Recording']['exposure_mode'])
-    #str(config['Recording']['exposure_mode'])
-    cam.awb_mode = config['Recording']['awb_mode']
-    cam.shutter_speed = int(config['Recording']['shutter_speed'])
-    
-    #time.sleep(20)
-    recording = False
-    #cam.wait_recording(5)
-    last_split=time.time()
-    still=None
-    filename=""
-    with array.PiRGBArray(cam,size=(int(bg_width),int(bg_height))) as output:
-        cam.capture(output, 'rgb', use_video_port=True, resize=(int(bg_width),int(bg_height)))
-        still = output.array[:,:,0]
-        time.sleep(5)
-        output.truncate(0)
-        while True:
+        print('auto', len(config['Recording']['exposure_mode']))
+        cam.exposure_mode = str(config['Recording']['exposure_mode'])
+        #str(config['Recording']['exposure_mode'])
+        cam.awb_mode = config['Recording']['awb_mode']
+        cam.shutter_speed = int(config['Recording']['shutter_speed'])
+        
+        #time.sleep(20)
+        recording = False
+        #cam.wait_recording(5)
+        last_split=time.time()
+        still=None
+        filename=""
+        with array.PiRGBArray(cam,size=(int(bg_width),int(bg_height))) as output:
             cam.capture(output, 'rgb', use_video_port=True, resize=(int(bg_width),int(bg_height)))
-            
-            # tell world we're still alive
-            led_green.toggle() 
-            
             still = output.array[:,:,0]
-            bg.update_bg(still)
+            time.sleep(5)
             output.truncate(0)
-            if (not bg.is_active()) and recording:
-                led_yellow.off()
-                print('move file')
-                os.rename(filename, config['Recording']['video_dir']+"/"+filename)
-                cam.stop_recording()
-                recording=False
-            elif bg.is_active() and not recording:
-                led_yellow.on()
-                print('start recording')
-                filename=config['General']['feeder_id']+'_'+datetime.datetime.utcnow().strftime("%Y-%m-%d-%H-%M-%S")+'.h264'
-                cam.start_recording(filename, resize=(int(cam_width),int(cam_height)), quality=20)
-                recording=True
-                last_split=time.time()
-            elif time.time()-last_split>int(config['Recording']['video_length']) and recording:
-                print('split recording')
-                filename_new=config['General']['feeder_id']+'_'+datetime.datetime.utcnow().strftime("%Y-%m-%d-%H-%M-%S")+'.h264'
-                cam.split_recording(filename_new)
-                last_split=time.time()
-                os.rename(filename, config['Recording']['video_dir']+"/"+filename)
-                filename=filename_new
-            if recording:
-                cam.wait_recording(float(config['Background']['bg_time']))
-            else:
-                time.sleep(float(config['Background']['bg_time']))
-        cam.stop_recording()
-    cam.stop_preview()
+            while True:
+                cam.capture(output, 'rgb', use_video_port=True, resize=(int(bg_width),int(bg_height)))
+                
+                # tell world we're still alive
+                led_green.toggle() 
+                
+                still = output.array[:,:,0]
+                bg.update_bg(still)
+                output.truncate(0)
+                if (not bg.is_active()) and recording:
+                    led_yellow.off()
+                    print('move file')
+                    os.rename(filename, config['Recording']['video_dir']+"/"+filename)
+                    cam.stop_recording()
+                    recording=False
+                elif bg.is_active() and not recording:
+                    led_yellow.on()
+                    print('start recording')
+                    filename=config['General']['feeder_id']+'_'+datetime.datetime.utcnow().strftime("%Y-%m-%d-%H-%M-%S")+'.h264'
+                    cam.start_recording(filename, resize=(int(cam_width),int(cam_height)), quality=20)
+                    recording=True
+                    last_split=time.time()
+                elif time.time()-last_split>int(config['Recording']['video_length']) and recording:
+                    print('split recording')
+                    filename_new=config['General']['feeder_id']+'_'+datetime.datetime.utcnow().strftime("%Y-%m-%d-%H-%M-%S")+'.h264'
+                    cam.split_recording(filename_new)
+                    last_split=time.time()
+                    os.rename(filename, config['Recording']['video_dir']+"/"+filename)
+                    filename=filename_new
+                if recording:
+                    cam.wait_recording(float(config['Background']['bg_time']))
+                else:
+                    time.sleep(float(config['Background']['bg_time']))
+            cam.stop_recording()
+        cam.stop_preview()
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config_path", default="raspicam.cfg")
+    args = parser.parse_args()
+
+    run_camera(args.config_path)
+
