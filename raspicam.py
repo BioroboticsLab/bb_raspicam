@@ -81,7 +81,7 @@ def run_camera(config_file_name):
         
         # window parameter doesnt work as API says. window remains small and position is changed with different widths and heights
         #cam.start_preview(fullscreen=False, window=(0, 0, int(cam_width/2), int(cam_height/2)))
-        cam.start_preview(fullscreen=False, window=(0, 0, 640, 480))
+        cam.start_preview(fullscreen=False, window=(0, 0, cam_width // 4, cam_height // 4))
 
         print('auto', len(config['Recording']['exposure_mode']))
         cam.exposure_mode = str(config['Recording']['exposure_mode'])
@@ -107,7 +107,7 @@ def run_camera(config_file_name):
                 led_green.toggle() 
                 
                 still = output.array[:,:,0]
-                bg.update_bg(still)
+                cd.update_bg(still)
                 output.truncate(0)
                 if (not bg.is_active()) and recording:
                     led_yellow.off()
