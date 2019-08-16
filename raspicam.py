@@ -71,9 +71,13 @@ def run_camera(config_file_name):
 
     led_green = LED(16)
     led_yellow = LED(20)
-
-    with PiCamera(sensor_mode = cam_mode) as cam:
+    
+    
+    with PiCamera(sensor_mode=cam_mode,
+                    resolution=(int(MAX_WIDTH), int(MAX_HEIGHT))
+                    ) as cam:
         cam.framerate = int(config['Recording']['framerate'])
+        cam.iso = int(config['Recording']['iso'])
         cam.zoom = (float(config['Recording']['zoom_x']),float(config['Recording']['zoom_y']),float(config['Recording']['zoom_w']),float(config['Recording']['zoom_h']))
         cam.exposure_compensation = int(config['Recording']['exposure_compensation'])
         
@@ -81,15 +85,17 @@ def run_camera(config_file_name):
         
         # window parameter doesnt work as API says. window remains small and position is changed with different widths and heights
         #cam.start_preview(fullscreen=False, window=(0, 0, int(cam_width/2), int(cam_height/2)))
-        cam.start_preview(fullscreen=False, window=(0, 0, cam_width // 4, cam_height // 4))
-
-        print('auto', len(config['Recording']['exposure_mode']))
+        preview = cam.start_preview(fullscreen=False,
+                    window=(0, 10, int(cam_width), int(cam_height)))
+        
+        print('auto', config['Recording']['exposure_mode'])
         cam.exposure_mode = str(config['Recording']['exposure_mode'])
         #str(config['Recording']['exposure_mode'])
         cam.awb_mode = config['Recording']['awb_mode']
         cam.shutter_speed = int(config['Recording']['shutter_speed'])
         
         #time.sleep(20)
+        print("Exposure : {}".format(cam.exposure_speed))
         recording = False
         #cam.wait_recording(5)
         last_split=time.time()
@@ -107,7 +113,7 @@ def run_camera(config_file_name):
                 led_green.toggle() 
                 
                 still = output.array[:,:,0]
-                cd.update_bg(still)
+                bg.update_bg(still)
                 output.truncate(0)
                 if (not bg.is_active()) and recording:
                     led_yellow.off()
