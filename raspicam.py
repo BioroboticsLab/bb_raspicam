@@ -71,6 +71,10 @@ def run_camera(config_file_name):
 
     led_green = LED(16)
     led_yellow = LED(20)
+
+    video_subdir = config['Recording']['video_dir'] + '/' + config['General']['feeder_id'] + '/'
+    if not os.path.exists(video_subdir):
+        os.makedirs(video_subdir)
     
     
     with PiCamera(sensor_mode=cam_mode,
@@ -118,7 +122,7 @@ def run_camera(config_file_name):
                 if (not bg.is_active()) and recording:
                     led_yellow.off()
                     print('move file')
-                    os.rename(filename, config['Recording']['video_dir']+"/"+filename)
+                    os.rename(filename, video_subdir+filename)
                     cam.stop_recording()
                     recording=False
                 elif bg.is_active() and not recording:
@@ -133,7 +137,7 @@ def run_camera(config_file_name):
                     filename_new=config['General']['feeder_id']+'_'+datetime.datetime.utcnow().strftime("%Y-%m-%d-%H-%M-%S")+'.h264'
                     cam.split_recording(filename_new)
                     last_split=time.time()
-                    os.rename(filename, config['Recording']['video_dir']+"/"+filename)
+                    os.rename(filename, video_subdir+filename)
                     filename=filename_new
                 if recording:
                     cam.wait_recording(float(config['Background']['bg_time']))
