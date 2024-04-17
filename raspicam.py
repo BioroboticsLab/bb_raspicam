@@ -128,13 +128,13 @@ def run_camera(config_file_name):
                 elif bg.is_active() and not recording:
                     led_yellow.on()
                     print('start recording')
-                    filename=config['General']['feeder_id']+'_'+datetime.datetime.utcnow().strftime("%Y-%m-%d-%H-%M-%S")+'.h264'
+                    filename=config['General']['feeder_id']+'_'+datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")+'.h264'
                     cam.start_recording(filename, resize=(int(cam_width),int(cam_height)), quality=20)
                     recording=True
                     last_split=time.time()
                 elif time.time()-last_split>int(config['Recording']['video_length']) and recording:
                     print('split recording')
-                    filename_new=config['General']['feeder_id']+'_'+datetime.datetime.utcnow().strftime("%Y-%m-%d-%H-%M-%S")+'.h264'
+                    filename_new=config['General']['feeder_id']+'_'+datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")+'.h264'
                     cam.split_recording(filename_new)
                     last_split=time.time()
                     os.rename(filename, video_subdir+filename)
