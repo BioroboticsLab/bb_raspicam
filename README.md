@@ -86,5 +86,4 @@ Use the included script to setup raspicam and imgstorage as system services that
 # Example:
 bash setup_autostart.sh /home/pi/bb_raspicam exitcam.cfg /home/pi/bb_imgstorage_nfs
 ```
-
-
+Reboot and then both will start automatically

@@ -18,7 +18,7 @@ RASPICAM_SERVICE=/etc/systemd/system/raspicam.service
 echo "Creating systemd service file for raspicam at $RASPICAM_SERVICE"
 sudo bash -c "cat > $RASPICAM_SERVICE" << EOF
 [Unit]
-Description=Start Raspicam on boot
+Description=bb_raspicam
 After=network.target
 
 [Service]
@@ -37,7 +37,7 @@ IMGSTORAGE_SERVICE=/etc/systemd/system/imgstorage.service
 echo "Creating systemd service file for imgstorage at $IMGSTORAGE_SERVICE"
 sudo bash -c "cat > $IMGSTORAGE_SERVICE" << EOF
 [Unit]
-Description=Start Image Storage on boot
+Description=bb_imgstorage_nfs
 After=network.target
 
 [Service]
@@ -60,6 +60,12 @@ echo "Enabling services to start at boot"
 sudo systemctl enable raspicam.service
 sudo systemctl enable imgstorage.service
 
-echo "\nSetup complete!  raspicam and imgstorage will start on boot."
-echo "to start manually, use these commands:\nsudo systemctl start raspicam.service\nsudo systemctl start imgstorage.service"
-echo "\nto stop:  \nsudo systemctl stop raspicam.service\nsudo systemctl stop imgstorage.service"
+echo ""
+echo "Setup complete!  raspicam and imgstorage will start on boot."
+echo "To start manually, use these commands:"
+echo "sudo systemctl start raspicam.service"
+echo "sudo systemctl start imgstorage.service"
+echo ""
+echo "To stop:"
+echo "sudo systemctl stop raspicam.service"
+echo "sudo systemctl stop imgstorage.service"
