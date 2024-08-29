@@ -22,10 +22,8 @@ sudo systemctl enable ntp.service
 # Clone necessary repositories and check out updates
 echo "Cloning necessary repositories..."
 cd ~
-git clone https://github.com/jacobdavidson/bb_imgstorage_nfs.git
+git clone https://github.com/BioroboticsLab/bb_imgstorage_nfs.git
 cd bb_imgstorage_nfs
-git fetch origin updates_2024
-git checkout updates_2024
 cd ..
 
 # Install Python packages

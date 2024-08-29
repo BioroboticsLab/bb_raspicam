@@ -11,10 +11,8 @@ Raspberry Pi install:
 ##  On RPi:
 ### Clone repo and run install script:
 ```
-git clone https://github.com/jacobdavidson/bb_raspicam.git
+git clone https://github.com/BioroboticsLab/bb_raspicam.git
 cd bb_raspicam
-git fetch origin updates_2024
-git checkout updates_2024
 bash setup_raspicam.sh
 ```
 
