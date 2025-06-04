@@ -81,8 +81,8 @@ python imgstorage.py
 ## Auto-start configuration
 Use the included script to setup raspicam and imgstorage as system services that start automatically when the RPi is restarted:
 ```
-# Usage: setup_autostart.sh /path/to/bb_raspicam raspicam_cfg_filename /path/to/bb_imgstorage_nfs
+# Usage: ./setup_autostart.sh /path/to/raspicam raspicam_cfg_filename /path/to/imgstorage txfr_cfg_filename
 # Example:
-bash setup_autostart.sh /home/pi/bb_raspicam exitcam.cfg /home/pi/bb_imgstorage_nfs
+bash setup_autostart.sh /home/pi/bb_raspicam exitcam.cfg /home/pi/bb_imgstorage_nfs txfr_exitcam.py
 ```
 Reboot and then both will start automatically
