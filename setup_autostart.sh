@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Usage: ./setup_autostart.sh /path/to/raspicam raspicam_cfg_filename /path/to/imgstorage
+# Usage: ./setup_autostart.sh /path/to/raspicam raspicam_cfg_filename /path/to/imgstorage txfr_cfg_filename
 
 # Check if all parameters are provided
-if [ "$#" -ne 3 ]; then
-    echo "Usage: $0 workingdirectory_for_raspicam raspicam_cfg_filename workingdirectory_for_imgstorage"
+if [ "$#" -ne 4 ]; then
+    echo "Usage: $0 workingdirectory_for_raspicam raspicam_cfg_filename workingdirectory_for_imgstorage txfr_cfg_filename"
     exit 1
 fi
 
@@ -12,6 +12,7 @@ fi
 WORKINGDIR_RASPICAM=$1
 RASPICAM_CFG_FILENAME=$2
 WORKINGDIR_IMGSTORAGE=$3
+TXFR_CFG_FILENAME=$4
 
 # Create systemd service file for raspicam
 RASPICAM_SERVICE=/etc/systemd/system/raspicam.service
@@ -44,7 +45,7 @@ After=network.target
 Type=simple
 User=pi
 WorkingDirectory=$WORKINGDIR_IMGSTORAGE
-ExecStart=/usr/bin/python3 imgstorage.py
+ExecStart=/usr/bin/python3 imgstorage.py $TXFR_CFG_FILENAME
 Restart=on-failure
 
 [Install]
