@@ -1,36 +1,66 @@
 #!/bin/bash
 
-# Update and upgrade the system
-echo "Updating and upgrading..."
-sudo apt update && sudo apt upgrade -y
+# ===================================================================
+# setup_raspicam.sh
+#
+# Sets up a Raspberry Pi 4 with Camera Module 3 (IMX708) for:
+#   • Picamera2 (libcamera) with Python bindings
+#   • Chrony NTP synchronization
+#   • OpenBox-based desktop + XRDP for remote desktop
+#   • Necessary networking and utility packages
+#   • ‘bb_imgstorage_nfs’ repository clone
+#
+# Run this script as root (or via sudo). It will:
+#   1. Update/upgrade APT and install libcamera‐apps + Picamera2 Python
+#   2. Install OpenBox desktop components and XRDP
+#   3. Install Chrony and configure NTP servers
+#   4. Enable Chrony, XRDP services
+#   5. Add the IMX708 Device Tree Overlay if not already present
+#   6. Clone the bb_imgstorage_nfs GitHub repo
+#   7. Set default boot behavior to desktop (B4)
+# ===================================================================
 
-# Install necessary packages
-echo "Installing necessary packages..."
-sudo apt install -y xrdp realvnc-vnc-server realvnc-vnc-viewer ntp vim tmux openconnect network-manager-openconnect-gnome
+set -e
 
-# Configure NTP server
-echo "Configuring the NTP time server..."
-# comment out lines that start with pool
-sudo sed -i '/^pool/s/^/#/' /etc/ntp.conf
-echo "server time.fu-berlin.de minpoll 3 maxpoll 8" | sudo tee -a /etc/ntp.conf
+## 1. Update & upgrade system 
+apt update
+apt full-upgrade -y
 
-# Enable services
-echo "Enabling NTP time and vnc servers to start at boot..."
-sudo systemctl enable vncserver-x11-serviced.service
-sudo systemctl enable ntp.service
+## 2. Install libcamera-apps and Picamera2 Python bindings ===
+apt install -y libcamera-apps python3-picamera2
 
-# Clone necessary repositories and check out updates
-echo "Cloning necessary repositories..."
-cd ~
-git clone https://github.com/BioroboticsLab/bb_imgstorage_nfs.git
-cd bb_imgstorage_nfs
-cd ..
+## 3. Install desktop (OpenBox) + XRDP ===
+# The OpenBox-based UI (“raspberrypi-ui-mods” pulls in the Pi’s default desktop environment)
+apt install -y raspberrypi-ui-mods lxsession lxterminal lxpanel openbox
+apt install -y xrdp
+systemctl enable --now xrdp
 
-# Install Python packages
-echo "Installing Python packages..."
-pip3 install --user --upgrade git+https://github.com/waveform80/picamera.git
+## 4. Install networking & utility packages
+apt install -y chrony vim tmux openconnect network-manager-openconnect-gnome
 
-echo 'Install done.'
+## 5. Configure Chrony NTP server 
+# Comment out default pool lines, then append FU Berlin NTP server
+sed -i '/^pool /s/^/#/' /etc/chrony/chrony.conf
+echo "server time.fu-berlin.de iburst minpoll 3 maxpoll 8" >> /etc/chrony/chrony.conf
+systemctl enable --now chrony
 
-# Raspberry Pi configuration
-echo "Please run 'sudo raspi-config', enable the camera under 'Interfacing Options' and reboot system"
+## 6. Ensure IMX708 overlay is set
+if grep -q '^dtoverlay=imx708' /boot/config.txt; then
+  echo "IMX708 overlay already present in /boot/config.txt"
+else
+  echo "dtoverlay=imx708" >> /boot/config.txt
+  echo "Added 'dtoverlay=imx708' to /boot/config.txt"
+fi
+
+## 7. Clone the bb_imgstorage_nfs repository
+cd /home/pi || cd ~
+if [ ! -d "bb_imgstorage_nfs" ]; then
+  git clone https://github.com/BioroboticsLab/bb_imgstorage_nfs.git
+else
+  echo "Repository 'bb_imgstorage_nfs' already exists; skipping clone"
+fi
+
+# 8. Set default boot to desktop (GUI)
+raspi-config nonint do_boot_behaviour B4
+
+echo "Setup complete. Please reboot the Pi to apply changes."

@@ -13,14 +13,15 @@ Raspberry Pi install:
 ```
 git clone https://github.com/BioroboticsLab/bb_raspicam.git
 cd bb_raspicam
-bash setup_raspicam.sh
+sudo bash setup_raspicam.sh
 ```
 
-### Enable camera and restart
+### (Optional) To enable remote desktop connections via RDP, use X11 desktop
 ```
 sudo raspi-config
 ```
--- Go to ‘Interfacing options’ and enable camera.
+-- Go to ‘Advanced Options’ then select Wayland
+-- Select X11
 -- reboot
 
 ### Check that the date/time is correct:

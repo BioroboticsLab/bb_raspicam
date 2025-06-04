@@ -1,157 +1,213 @@
-import time
-from picamera import PiCamera, array
-import datetime
-import configparser
-import os
-import numpy as np
+import time, datetime, configparser, os, numpy as np
 from gpiozero import LED
+from picamera2 import Picamera2
+from picamera2.encoders import H264Encoder
+from picamera2.outputs import FileOutput
 
-# background accumulation via exponential average
+
 class Background:
-    # parameters:
-    # ------------------
-    # alpha     : 
-    # threshold :
-    # delay     :
-    def __init__(self, alpha, threshold, area_threshold, delay, background_width, background_height):
-        self.alpha = alpha
-        self.active = False
-        self.threshold = threshold
-        self.area_threshold = area_threshold
-        self.initialized = False
-        self.last_active = time.time()
-        self.delay = delay
-        self.total_background_pixels = background_width * background_height
-    
-    # called every frame to update background hypothesis
-    def update_bg(self,img):
+    def __init__(self, alpha, diff_th, area_th, delay, w, h):
+        self.alpha          = alpha
+        self.diff_th        = diff_th      # per-pixel |bg – img| > diff_th
+        self.area_th        = area_th      # fraction of pixels above that
+        self.delay          = delay
+        self.total          = w * h
+        self.initialized    = False
+        self.last_active    = time.time()
+
+    def update_bg(self, img):
+        """
+        Blend in a new lo-res frame, compute the changed-pixel fraction,
+        return True if changed >= area_th (i.e. frame_motion).
+        """
         if not self.initialized:
-            self.background = img
+            self.bg = img.astype(np.float32)
             self.initialized = True
-        else:
-            # total amount of image difference to background
-            #changedpx = np.sum( np.abs(self.background - img) ) / bg_pixels
-            
-            # count the number of pixels whose difference to the background is greater than the threshold
-            # this is supposed to be more stable with varying lighting conditions
-            changedpx = np.sum( np.where( np.abs(self.background - img) > self.threshold) ) / self.total_background_pixels
-            
-            print(changedpx)
-            
-            if changedpx < self.area_threshold:
-                self.active = False
-            else:
-                self.active = True
-                self.last_active = time.time()
-                
-            self.background = self.background * self.alpha + img * (1-self.alpha)
-        
+            print(f"[BG INIT] waiting for next frame…")
+            return False
+
+        # 1) which pixels moved?
+        diff = np.abs(self.bg - img) > self.diff_th
+        changed = diff.sum() / self.total
+
+        # 2) diagnostic print
+        print(f"Changed ratio: {changed:.4f}   "
+              f"(diff_th={self.diff_th}, area_th={self.area_th:.4f})")
+
+        # 3) update background model
+        self.bg = self.bg * self.alpha + img * (1 - self.alpha)
+
+        # 4) did this frame count as motion?
+        if changed >= self.area_th:
+            self.last_active = time.time()
+            return True
+        return False
+
     def is_active(self):
-        return time.time() - self.last_active < self.delay
+        """Still ‘active’ if we saw motion within the last `delay` seconds."""
+        return (time.time() - self.last_active) < self.delay
 
-def run_camera(config_file_name):
-    config = configparser.ConfigParser()
-    config.read(config_file_name)
+def run_camera(cfg_path):
+    cfg = configparser.ConfigParser()
+    cfg.read(cfg_path)
 
-    cam_mode = int(config['Recording']['sensor_mode'])
-    print(cam_mode)
-    MAX_WIDTH = float(config['Recording']['sensor_width'])	
-    MAX_HEIGHT = float(config['Recording']['sensor_height'])
-    cam_width = float(config['Recording']['zoom_w']) * MAX_WIDTH
-    cam_height = float(config['Recording']['zoom_h']) * MAX_HEIGHT
-    bg_scale_factor = float(config['Background']['scale_factor'])
-    bg_width = round((cam_width*bg_scale_factor)/32)*32
-    bg_height = round((cam_height*bg_scale_factor)/16)*16
+    # -- Background params --
+    alpha = float(cfg['Background']['alpha'])
+    diff_th = int(cfg['Background']['diff_threshold'])
+    area_th = float(cfg['Background']['area_threshold'])
+    delay   = int(cfg['Background']['delay'])
+    bg_time = float(cfg['Background']['bg_time'])
+    scale   = float(cfg['Background']['scale_factor'])
 
-    bg = Background(float(config['Background']['alpha']),
-                    int(config['Background']['diff_threshold']),
-                    float(config['Background']['area_threshold']),
-                    int(config['Background']['delay']),
-                    bg_width, bg_height)
+    # -- Recording params --
+    fr = int(cfg['Recording']['framerate'])
+    sw = int(cfg['Recording']['sensor_width'])
+    sh = int(cfg['Recording']['sensor_height'])
+    zx, zy = float(cfg['Recording']['zoom_x']), float(cfg['Recording']['zoom_y'])
+    zw, zh = float(cfg['Recording']['zoom_w']), float(cfg['Recording']['zoom_h'])
+    vid_len = int(cfg['Recording']['video_length'])
+    vid_dir = cfg['Recording']['video_dir']
+    exp_mode = cfg['Recording']['exposure_mode']
+    exp_comp = int(cfg['Recording']['exposure_compensation'])
+    awb_mode = cfg['Recording']['awb_mode']
+    shutter_spd = int(cfg['Recording']['shutter_speed'])
+    iso = int(cfg['Recording']['iso'])
 
-    led_green = LED(16)
+    # compute crop & lores sizes
+    cam_w = int(sw * zw)
+    cam_h = int(sh * zh)
+    bg_w  = (round((cam_w * scale) / 32) * 32)
+    bg_h  = (round((cam_h * scale) / 16) * 16)
+
+    bg = Background(alpha, diff_th, area_th, delay, bg_w, bg_h)
+
+    feeder = cfg['General']['feeder_id']
+    out_dir = os.path.join(vid_dir, feeder)
+    os.makedirs(out_dir, exist_ok=True)
+
+    # --- Picamera2 setup ---
+    # apply sensor mode _first_
+    picam2 = Picamera2()
+
+    # 1. Create the video configuration (no framerate or controls here)
+    cam_mode = int(cfg['Recording']['sensor_mode'])
+    mode = picam2.sensor_modes[cam_mode]   
+    video_config = picam2.create_video_configuration(
+        main  = {"size": (cam_w,  cam_h), "format": "YUV420"},
+        lores = {"size": (bg_w,   bg_h), "format": "YUV420"},
+        buffer_count = 4,
+        sensor = {
+            "output_size": mode["size"],                   # e.g. (2304, 1296)
+            "bit_depth":   mode["bit_depth"]               # e.g. 10 or 12
+        }
+    )
+    # 2. Configure the camera
+    picam2.configure(video_config)
+
+    # 3. Compute frame-duration limits for your target framerate
+    frame_us = int(1e6 / fr)  # e.g. fr=15 gives ~66667 µs per frame
+
+    # 4. Set runtime controls 
+    x0 = int(zx * sw)
+    y0 = int(zy * sh)
+    controls = {
+        "ScalerCrop": (x0, y0, cam_w, cam_h),
+        "FrameRate": fr,
+        "FrameDurationLimits": (frame_us, frame_us),
+        "AeEnable":    (exp_mode.lower() != "off"),
+        "ExposureTime":   shutter_spd,
+        "AnalogueGain":   iso / 100.0,
+        "AwbEnable":   (awb_mode.lower() != "off"),
+    }
+    if "ExposureValue" in picam2.camera_controls:
+        controls["ExposureValue"] = exp_comp
+    picam2.set_controls(controls)    
+    # Try to read user-defined bitrate from config (optional param)
+    bitrate = cfg['Recording'].getint('bitrate', fallback=-1)
+
+    # Auto-select bitrate based on sensor mode if not specified
+    if bitrate <= 0:
+        sensor_mode = int(cfg['Recording']['sensor_mode'])
+        if sensor_mode == 0:
+            bitrate = 4_000_000
+        elif sensor_mode == 1:
+            bitrate = 8_000_000
+        elif sensor_mode == 2:
+            bitrate = 15_000_000
+        else:
+            bitrate = 6_000_000  # Default fallback
+    encoder = H264Encoder(bitrate=bitrate) 
+    recording = False
+    filename = None
+    last_split = time.time()
+
+    led_green  = LED(16)
     led_yellow = LED(20)
 
-    video_subdir = config['Recording']['video_dir'] + '/' + config['General']['feeder_id'] + '/'
-    if not os.path.exists(video_subdir):
-        os.makedirs(video_subdir)
-    
-    
-    with PiCamera(sensor_mode=cam_mode,
-                    resolution=(int(MAX_WIDTH), int(MAX_HEIGHT))
-                    ) as cam:
-        cam.framerate = int(config['Recording']['framerate'])
-        cam.iso = int(config['Recording']['iso'])
-        cam.zoom = (float(config['Recording']['zoom_x']),float(config['Recording']['zoom_y']),float(config['Recording']['zoom_w']),float(config['Recording']['zoom_h']))
-        cam.exposure_compensation = int(config['Recording']['exposure_compensation'])
-        
-        cam.color_effects=(128,128)
-        
-        # window parameter doesnt work as API says. window remains small and position is changed with different widths and heights
-        #cam.start_preview(fullscreen=False, window=(0, 0, int(cam_width/2), int(cam_height/2)))
-        preview = cam.start_preview(fullscreen=False,
-                    window=(0, 10, int(cam_width), int(cam_height)))
-        
-        print('auto', config['Recording']['exposure_mode'])
-        cam.exposure_mode = str(config['Recording']['exposure_mode'])
-        #str(config['Recording']['exposure_mode'])
-        cam.awb_mode = config['Recording']['awb_mode']
-        cam.shutter_speed = int(config['Recording']['shutter_speed'])
-        
-        #time.sleep(20)
-        print("Exposure : {}".format(cam.exposure_speed))
-        recording = False
-        #cam.wait_recording(5)
-        last_split=time.time()
-        still=None
-        filename=""
-        with array.PiRGBArray(cam,size=(int(bg_width),int(bg_height))) as output:
-            cam.capture(output, 'rgb', use_video_port=True, resize=(int(bg_width),int(bg_height)))
-            still = output.array[:,:,0]
-            time.sleep(5)
-            output.truncate(0)
-            while True:
-                cam.capture(output, 'rgb', use_video_port=True, resize=(int(bg_width),int(bg_height)))
-                
-                # tell world we're still alive
-                led_green.toggle() 
-                
-                still = output.array[:,:,0]
-                bg.update_bg(still)
-                output.truncate(0)
-                if (not bg.is_active()) and recording:
-                    led_yellow.off()
-                    print('move file')
-                    os.rename(filename, video_subdir+filename)
-                    cam.stop_recording()
-                    recording=False
-                elif bg.is_active() and not recording:
-                    led_yellow.on()
-                    print('start recording')
-                    filename=config['General']['feeder_id']+'_'+datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")+'.h264'
-                    cam.start_recording(filename, resize=(int(cam_width),int(cam_height)), quality=20)
-                    recording=True
-                    last_split=time.time()
-                elif time.time()-last_split>int(config['Recording']['video_length']) and recording:
-                    print('split recording')
-                    filename_new=config['General']['feeder_id']+'_'+datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")+'.h264'
-                    cam.split_recording(filename_new)
-                    last_split=time.time()
-                    os.rename(filename, video_subdir+filename)
-                    filename=filename_new
-                if recording:
-                    cam.wait_recording(float(config['Background']['bg_time']))
-                else:
-                    time.sleep(float(config['Background']['bg_time']))
-            cam.stop_recording()
-        cam.stop_preview()
+    def new_filename():
+        return os.path.join(
+            out_dir,
+            f"{feeder}_{datetime.datetime.now():%Y-%m-%d-%H-%M-%S}.h264"
+        )
+
+    # —– warm up & kick off first recording —–
+    picam2.start()
+    time.sleep(2)
+
+    # … after your picam2.start() and warmup …
+
+    segment_motion = False
+    filename       = new_filename()
+    encoder        = H264Encoder(bitrate=bitrate)
+    picam2.start_recording(encoder, FileOutput(filename))
+    segment_start  = time.time()
+
+    while True:
+        # 1) grab & update BG
+        job = picam2.capture_buffer("lores", wait=False)
+        if job is None:
+            time.sleep(0.01)
+            continue
+        buf     = picam2.wait(job)
+        arr     = np.frombuffer(buf, np.uint8)
+        y_plane = arr[: bg_w*bg_h].reshape((bg_h, bg_w))
+
+        # get per-frame motion flag
+        frame_motion = bg.update_bg(y_plane)
+        active       = bg.is_active()
+
+        # if *this* frame had motion, mark the segment
+        if frame_motion:
+            segment_motion = True
+
+        print(f"frame_motion={frame_motion}, segment_active={active}")
+
+        # 2) rollover chunk if too long
+        if time.time() - segment_start > vid_len:
+            picam2.stop_recording()
+
+            if not segment_motion:
+                os.remove(filename)
+                print(f"— deleted (no motion): {filename}")
+            else:
+                print(f"— saved   (motion): {filename}")
+
+            # start next chunk
+            filename       = new_filename()
+            encoder        = H264Encoder(bitrate=bitrate)
+            picam2.start_recording(encoder, FileOutput(filename))
+            segment_start  = time.time()
+            segment_motion = False
+
+        # 3) LEDs
+        led_green.toggle()
+        led_yellow.value = active
+
+
+
 
 if __name__ == "__main__":
     import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("config_path", default="raspicam.cfg")
-    args = parser.parse_args()
-
-    run_camera(args.config_path)
-
+    p = argparse.ArgumentParser()
+    p.add_argument("config_path", default="feedercam.cfg")
+    run_camera(p.parse_args().config_path)
