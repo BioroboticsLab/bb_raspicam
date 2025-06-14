@@ -59,10 +59,16 @@ def run_camera(cfg_path):
     bg_time = float(cfg['Background']['bg_time'])
     scale   = float(cfg['Background']['scale_factor'])
 
+    # --- Picamera2 setup ---
+    # apply sensor mode _first_
+    picam2 = Picamera2()
+    # 1. Create the video configuration (no framerate or controls here)
+    cam_mode = int(cfg['Recording']['sensor_mode'])
+    mode = picam2.sensor_modes[cam_mode]   
+
     # -- Recording params --
     fr = int(cfg['Recording']['framerate'])
-    sw = int(cfg['Recording']['sensor_width'])
-    sh = int(cfg['Recording']['sensor_height'])
+    sw, sh = mode["size"]
     zx, zy = float(cfg['Recording']['zoom_x']), float(cfg['Recording']['zoom_y'])
     zw, zh = float(cfg['Recording']['zoom_w']), float(cfg['Recording']['zoom_h'])
     vid_len = int(cfg['Recording']['video_length'])
@@ -75,10 +81,21 @@ def run_camera(cfg_path):
     lensposition = float(cfg['Recording']['lens_focus_position'])
 
     # compute crop & lores sizes
-    cam_w = int(sw * zw)
-    cam_h = int(sh * zh)
+    cam_w = round(sw * zw / 32) * 32
+    cam_h = round(sh * zh / 16) * 16
+    aspect = cam_w / cam_h
+
+    # clamp max width to 1920, then derive height from the same AR
+    out_w = min(cfg.getint("Recording", "output_width"), 1920)
+    out_h = int(out_w / aspect)            # keeps the same cam_w/cam_h ratio
+    if out_h > 1080:                       # if that overshoots max height…
+        out_h = 1080
+        out_w = int(out_h * aspect)
+
     bg_w  = (round((cam_w * scale) / 32) * 32)
     bg_h  = (round((cam_h * scale) / 16) * 16)
+
+    frame_us = int(1e6 / fr)  # e.g. fr=15 gives ~66667 µs per frame    
 
     bg = Background(alpha, diff_th, area_th, delay, bg_w, bg_h)
 
@@ -86,27 +103,21 @@ def run_camera(cfg_path):
     out_dir = os.path.join(vid_dir, feeder)
     os.makedirs(out_dir, exist_ok=True)
 
-    # --- Picamera2 setup ---
-    # apply sensor mode _first_
-    picam2 = Picamera2()
-
-    # 1. Create the video configuration (no framerate or controls here)
-    cam_mode = int(cfg['Recording']['sensor_mode'])
-    mode = picam2.sensor_modes[cam_mode]   
     video_config = picam2.create_video_configuration(
-        main  = {"size": (cam_w,  cam_h), "format": "YUV420"},
+        main  = {"size": (out_w,  out_h), "format": "YUV420"},
         lores = {"size": (bg_w,   bg_h), "format": "YUV420"},
         buffer_count = 4,
         sensor = {
             "output_size": mode["size"],                   # e.g. (2304, 1296)
             "bit_depth":   mode["bit_depth"]               # e.g. 10 or 12
-        }
+        },
+        controls     = {
+            # clamp frame times to exactly 100 ms => 10 fps
+            "FrameDurationLimits": (frame_us, frame_us)
+        }        
     )
     # 2. Configure the camera
     picam2.configure(video_config)
-
-    # 3. Compute frame-duration limits for your target framerate
-    frame_us = int(1e6 / fr)  # e.g. fr=15 gives ~66667 µs per frame
 
     # 4. Set runtime controls 
     x0 = int(zx * sw)
@@ -139,7 +150,7 @@ def run_camera(cfg_path):
             bitrate = 15_000_000
         else:
             bitrate = 6_000_000  # Default fallback
-    encoder = H264Encoder(bitrate=bitrate) 
+
     recording = False
     filename = None
     last_split = time.time()
@@ -161,9 +172,11 @@ def run_camera(cfg_path):
 
     segment_motion = False
     filename       = new_filename()
-    encoder        = H264Encoder(bitrate=bitrate)
+    encoder = H264Encoder(bitrate=bitrate, framerate=fr, repeat=True, enable_sps_framerate=True)
     picam2.start_recording(encoder, FileOutput(filename))
-    segment_start  = time.time()
+
+    target_frames = fr * vid_len   # e.g. 10 fps × 30 s = 300 frames
+    frame_counter = 0
 
     while True:
         # 1) grab & update BG
@@ -185,8 +198,11 @@ def run_camera(cfg_path):
 
         print(f"frame_motion={frame_motion}, segment_active={segment_motion}")
 
-        # 2) rollover chunk if too long
-        if time.time() - segment_start > vid_len:
+        # after you process each frame (and before your LED toggle)
+        frame_counter += 1
+
+        # 2) rollover chunk if too long.  do it based on number of frames
+        if frame_counter >= target_frames:
             picam2.stop_recording()
 
             if not segment_motion:
@@ -195,11 +211,17 @@ def run_camera(cfg_path):
             else:
                 print(f"— saved   (motion): {filename}")
 
-            # start next chunk
+            # reset for the next segment
             filename       = new_filename()
-            encoder        = H264Encoder(bitrate=bitrate)
+            encoder        = H264Encoder(
+                bitrate=bitrate,
+                framerate=fr,
+                repeat=True,
+                enable_sps_framerate=True
+            )
             picam2.start_recording(encoder, FileOutput(filename))
-            segment_start  = time.time()
+
+            frame_counter  = 0
             segment_motion = False
 
         # 3) LEDs
