@@ -86,7 +86,9 @@ def run_camera(cfg_path):
     bg = Background(alpha, diff_th, area_th, delay, bg_w, bg_h)
 
     # Directory layout
-    tmp_dir = os.path.join(vid_dir, 'tmp')
+    # tmp directory as sibling to Videos (parent of vid_dir)
+    parent = os.path.dirname(os.path.abspath(vid_dir))
+    tmp_dir = os.path.join(parent, 'tmp')
     out_dir = os.path.join(vid_dir, feeder)
     os.makedirs(tmp_dir, exist_ok=True)
     os.makedirs(out_dir, exist_ok=True)
