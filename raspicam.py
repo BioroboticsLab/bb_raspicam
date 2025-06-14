@@ -72,6 +72,7 @@ def run_camera(cfg_path):
     awb_mode = cfg['Recording']['awb_mode']
     shutter_spd = int(cfg['Recording']['shutter_speed'])
     iso = int(cfg['Recording']['iso'])
+    lensposition = float(cfg['Recording']['lens_focus_position'])
 
     # compute crop & lores sizes
     cam_w = int(sw * zw)
@@ -118,6 +119,8 @@ def run_camera(cfg_path):
         "ExposureTime":   shutter_spd,
         "AnalogueGain":   iso / 100.0,
         "AwbEnable":   (awb_mode.lower() != "off"),
+        "AfMode": 0,                 # manual focus mode
+        "LensPosition": lensposition
     }
     if "ExposureValue" in picam2.camera_controls:
         controls["ExposureValue"] = exp_comp
@@ -177,10 +180,10 @@ def run_camera(cfg_path):
         active       = bg.is_active()
 
         # if *this* frame had motion, mark the segment
-        if frame_motion:
+        if frame_motion or active:
             segment_motion = True
 
-        print(f"frame_motion={frame_motion}, segment_active={active}")
+        print(f"frame_motion={frame_motion}, segment_active={segment_motion}")
 
         # 2) rollover chunk if too long
         if time.time() - segment_start > vid_len:
