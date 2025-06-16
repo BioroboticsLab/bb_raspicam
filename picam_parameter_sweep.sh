@@ -4,7 +4,7 @@
 # Run take_snapshot.py over ranges of zoom-y, zoom-h, and focus values
 # Configuration file for snapshots
 
-CONFIG=“feedercamD.cfg”
+CONFIG=“feedercam.cfg”
 
 Output directory for snapshots
 
