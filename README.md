@@ -86,3 +86,11 @@ Use the included script to setup raspicam and imgstorage as system services that
 bash setup_autostart.sh /home/pi/bb_raspicam exitcam.cfg /home/pi/bb_imgstorage_nfs txfr_exitcam.py
 ```
 Reboot and then both will start automatically
+
+# Hardware
+
+- [Raspberry Pi 4 / 2 GB](https://www.mouser.de/ProductDetail/358-SC01939)
+- [Camera module 3, regular (for feeder cams or general use)](https://www.mouser.de/ProductDetail/358-SC0872)
+- [Camera module 3 NoIR (for exit cams)](https://www.mouser.de/ProductDetail/358-SC0873)
+- [Raspberry pi power supply](https://www.mouser.de/ProductDetail/358-SC1411)
+- [Mouser project: bb exitcam lighting](https://www.mouser.de/api/CrossDomain/GetContext?syncDomains=www&returnUrl=https%3a%2f%2fwww.mouser.com%2fTools%2fProject%2fShare%3fAccessID%3d3c2e08f937&async=False&setPrefSub=False&clearPrefSub=False)
