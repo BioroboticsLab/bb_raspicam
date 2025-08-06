@@ -9,33 +9,65 @@ Raspberry Pi install:
 - Flash the OS with appropriate version to the SD card
 
 ##  On RPi:
-### Clone repo and run install script:
+### 1) Clone repo and run install script:
 ```
 git clone https://github.com/BioroboticsLab/bb_raspicam.git
 cd bb_raspicam
 sudo bash setup_raspicam.sh
 ```
 
-### (Optional) To enable remote desktop connections via RDP, use X11 desktop
-```
-sudo raspi-config
-```
--- Go to ‘Advanced Options’ then select Wayland
--- Select X11
--- reboot
+### 2) Time sync (Chrony): Internet vs. local server
 
-### Check that the date/time is correct:
+#### Option A — Pi has Internet (default)
+Already configured by `setup_raspicam.sh`:
+```bash
+# Verify it’s syncing
+chronyc sources -v
+chronyc tracking
+```
+
+#### Option B — Pi has NO Internet (use a local time server)
+See [Time server sync setup](time_server_sync_setup.md) for more information; shown here are the main steps
+
+1) Setup a time server on a local computer (see [Time server sync setup](time_server_sync_setup.md)).
+
+2) Ensure the server (here using the name 'roadking') is reachable by name (or use its IP):
+```bash
+sudo apt install -y avahi-utils libnss-mdns
+getent ahosts roadking.local   # should show an IP; otherwise use the IP directly
+```
+
+3) Repoint Chrony to your local server and restart:
+```bash
+# Comment out any existing pool/server lines
+sudo sed -i '/^[[:space:]]*\(pool\|server\)[[:space:]]/s/^/#/' /etc/chrony/chrony.conf
+
+# Add your local server (choose one)
+echo "server roadking.local iburst minpoll 3 maxpoll 8" | sudo tee -a /etc/chrony/chrony.conf
+
+sudo systemctl restart chrony
+```
+
+4) Verify:
+```bash
+chronyc sources -v
+chronyc tracking
+```
+You should see `roadking.local` (or `cirrus.local`) once synchronized.
+
+
+### 3) Check that the date/time is correct:
 ```
 date --iso-8601=ns
 ```
 
-### Setup SSH key for server
+### 4) Setup SSH key for server
 ```
 ssh-keygen -t rsa -b 2048
 ssh-copy-id pi@SERVERNAME
 ```
 
-### Create user_config.py file for file transfer:
+### 5) Create user_config.py file for file transfer:
 ```
 cd bb_imgstorage_nfs
 vim user_config.py
@@ -43,8 +75,17 @@ vim user_config.py
 Fill in settings
 
 
-### Edit config files
+### 6) Edit config files
 Update local copies of **exitcam.cfg** or **feedercam.cfg** with appropriate device number and settings
+
+
+### 7) (Optional) To enable remote desktop connections via RDP, use X11 desktop
+```
+sudo raspi-config
+```
+-- Go to ‘Advanced Options’ then select Wayland
+-- Select X11
+-- reboot
 
 ### 
 
@@ -55,12 +96,7 @@ ssh pi@exitcam0.local
 date --iso-8601=ns
 ```
 
-2) If needed - connect to VPN network
-```
-sudo openconnect -u USERNAME -b vpn.fu-berlin.de
-```
-
-3) Start camera program on RPi.  Use either exitcam.cfg or feedercam.cfg as input
+2) Start camera program on RPi.  Use either exitcam.cfg or feedercam.cfg as input
 ```
 tmux new -s cam
 cd bb_raspicam
@@ -71,7 +107,7 @@ python3 raspicam.py feedercam.cfg
 
 ```
 
-4) Start file transfer on RPi
+3) Start file transfer on RPi
 ```
 tmux new -s txfr
 cd bb_imgstorage_nfs
