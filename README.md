@@ -40,7 +40,7 @@ getent ahosts roadking.local   # should show an IP; otherwise use the IP directl
 3) Repoint Chrony to your local server and restart:
 ```bash
 # Comment out any existing pool/server lines
-sudo sed -i '/^[[:space:]]*\(pool\|server\)[[:space:]]/s/^/#/' /etc/chrony/chrony.conf
+sudo sed -i '/^[[:space:]]*\(pool\|server\|sourcedir\)[[:space:]]/s/^/#/' /etc/chrony/chrony.conf
 
 # Add your local server (choose one)
 echo "server roadking.local iburst minpoll 3 maxpoll 8" | sudo tee -a /etc/chrony/chrony.conf
