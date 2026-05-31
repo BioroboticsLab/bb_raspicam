@@ -1,4 +1,4 @@
-import time, datetime, configparser, os, shutil, numpy as np
+import time, datetime, configparser, os, shutil, pathlib, numpy as np
 from gpiozero import LED
 from picamera2 import Picamera2
 from picamera2.encoders import H264Encoder
@@ -133,6 +133,18 @@ def run_camera(cfg_path):
     frame_counter = 0
     segment_motion = False
 
+    # Heartbeat: touched every `heartbeat_every_frames` captured frames so
+    # bb_monitor systemcheck can tell "service running" apart from "service
+    # running but camera silently delivering no frames".
+    if cfg.has_section('Monitoring'):
+        heartbeat_path = cfg['Monitoring'].get('heartbeat_path', '/tmp/raspicam_heartbeat')
+        heartbeat_every_frames = cfg['Monitoring'].getint('heartbeat_every_frames', fallback=30)
+    else:
+        heartbeat_path = '/tmp/raspicam_heartbeat'
+        heartbeat_every_frames = 30
+    heartbeat_file = pathlib.Path(heartbeat_path)
+    heartbeat_counter = 0
+
     filename = new_filename(tmp_dir)
     encoder  = H264Encoder(
         bitrate             = cfg['Recording'].getint('bitrate', fallback=-1) or 8_000_000,
@@ -160,6 +172,14 @@ def run_camera(cfg_path):
         if frame_motion or bg.is_active():
             segment_motion = True
         print(f"frame_motion={frame_motion}, segment_active={segment_motion}")
+
+        heartbeat_counter += 1
+        if heartbeat_counter >= heartbeat_every_frames:
+            try:
+                heartbeat_file.touch()
+            except OSError as e:
+                print(f"[heartbeat] touch failed: {e}")
+            heartbeat_counter = 0
 
         # Frame count split
         frame_counter += 1
