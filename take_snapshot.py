@@ -59,8 +59,8 @@ def main():
     # Start and apply focus mode BEFORE warm-up so the lens has time to move
     picam2.start()
     if args.af:
-        # Continuous AF + one-shot trigger; we'll read back the settled LensPosition after capture
-        picam2.set_controls({'AfMode': 1, 'AfTrigger': 0})
+        # Auto mode; actual cycle is triggered + awaited below after warm-up
+        picam2.set_controls({'AfMode': 1})
     else:
         picam2.set_controls({'AfMode': 0, 'LensPosition': focus_pos})
 
@@ -88,6 +88,12 @@ def main():
     # Apply crop (focus and exposure already set above)
     picam2.set_controls({'ScalerCrop': (x0, y0, cam_w, cam_h)})
     time.sleep(0.3)
+
+    # If --af, run a blocking autofocus cycle now (after warm-up and exposure settle)
+    af_success = None
+    if args.af:
+        af_success = picam2.autofocus_cycle()
+        print(f"Autofocus cycle {'converged' if af_success else 'FAILED'}")
 
     # Output path
     ts = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
