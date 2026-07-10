@@ -123,6 +123,39 @@ bash setup_autostart.sh /home/pi/bb_raspicam exitcam.cfg /home/pi/bb_imgstorage_
 ```
 Reboot and then both will start automatically
 
+**Re-run this on every Pi after pulling this repo.** The generated units changed: they now use
+`Restart=always` (`on-failure` will not restart a service that was sent a SIGTERM, because systemd
+counts that as a clean exit), disable systemd's "give up after 5 starts in 10s" limit, and wait for
+chrony to sync the clock before recording starts. Existing Pis keep their old units until
+`setup_autostart.sh` is run again.
+
+## Monitoring and self-healing
+
+`raspicam.py` touches a heartbeat file (default `/tmp/raspicam_heartbeat`) every 30 captured frames.
+[bb_monitor](https://github.com/BioroboticsLab/bb_monitor)'s system check reads its mtime to tell
+"the service is running" apart from "the service is running but the camera is silently delivering no
+frames" — a failure mode systemd cannot see, because the process stays alive.
+
+Two layers handle that wedge:
+
+1. **Locally**, if no frame arrives for `watchdog_seconds` (default 60) the process exits and
+   systemd restarts it within `RestartSec`.
+2. **Remotely**, if the process is hung inside a blocking libcamera call and cannot notice, the
+   monitor SIGKILLs it over SSH once the stale heartbeat has been seen on two consecutive checks.
+
+Override the defaults with an optional `[Monitoring]` section in your camera config:
+
+```ini
+[Monitoring]
+heartbeat_path         = /tmp/raspicam_heartbeat
+heartbeat_every_frames = 30
+watchdog_seconds       = 60      ; 0 disables the local watchdog
+```
+
+Because the Pi has no real-time clock, the boot clock is whatever `fake-hwclock` saved until chrony
+steps it forward. The service therefore waits (up to 30s) for chrony to sync before recording, so
+video filenames and heartbeat mtimes are not stamped with a bogus time.
+
 # Hardware
 
 - [Raspberry Pi 4 / 2 GB](https://www.mouser.de/ProductDetail/358-SC01939)

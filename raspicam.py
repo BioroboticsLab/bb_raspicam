@@ -58,6 +58,34 @@ def run_camera(cfg_path):
     vid_dir = cfg['Recording']['video_dir']
     feeder  = cfg['General']['feeder_id']
 
+    # Monitoring params
+    # heartbeat_path is touched every `heartbeat_every_frames` captured frames so
+    # bb_monitor's system check can tell "service running" apart from "service
+    # running but camera silently delivering no frames".
+    # watchdog_seconds: exit (letting systemd restart us) if the camera stops
+    # delivering frames for that long. 0 disables.
+    if cfg.has_section('Monitoring'):
+        heartbeat_path         = cfg['Monitoring'].get('heartbeat_path', '/tmp/raspicam_heartbeat')
+        heartbeat_every_frames = cfg['Monitoring'].getint('heartbeat_every_frames', fallback=30)
+        watchdog_seconds       = cfg['Monitoring'].getint('watchdog_seconds', fallback=60)
+    else:
+        heartbeat_path         = '/tmp/raspicam_heartbeat'
+        heartbeat_every_frames = 30
+        watchdog_seconds       = 60
+    heartbeat_file    = pathlib.Path(heartbeat_path)
+    heartbeat_counter = 0
+
+    def touch_heartbeat():
+        try:
+            heartbeat_file.touch()
+        except OSError as e:
+            print(f"[heartbeat] touch failed: {e}")
+
+    # Create the heartbeat before touching the camera, so that to bb_monitor a
+    # *missing* file means only one thing: this Pi runs a raspicam too old to write
+    # one. Anything that goes wrong from here on shows up as a *stale* file instead.
+    touch_heartbeat()
+
     # Picamera2 setup
     picam2   = Picamera2()
     cam_mode = int(cfg['Recording']['sensor_mode'])
@@ -92,6 +120,17 @@ def run_camera(cfg_path):
     out_dir = os.path.join(vid_dir, feeder)
     os.makedirs(tmp_dir, exist_ok=True)
     os.makedirs(out_dir, exist_ok=True)
+
+    # A segment is only moved to out_dir (or deleted) at a clean frame-count
+    # boundary, so every crash or kill strands its in-progress .h264 here. Nothing
+    # else ever removes them, and on a Pi that has been restarted a few times they
+    # fill the SD card. We are the only writer, so anything present now is an orphan.
+    for orphan in pathlib.Path(tmp_dir).glob('*.h264'):
+        try:
+            orphan.unlink()
+            print(f"— removed orphaned segment: {orphan}")
+        except OSError as e:
+            print(f"[tmp] could not remove {orphan}: {e}")
 
     # Video configuration
     video_config = picam2.create_video_configuration(
@@ -132,18 +171,7 @@ def run_camera(cfg_path):
     target_frames = fr * vid_len
     frame_counter = 0
     segment_motion = False
-
-    # Heartbeat: touched every `heartbeat_every_frames` captured frames so
-    # bb_monitor systemcheck can tell "service running" apart from "service
-    # running but camera silently delivering no frames".
-    if cfg.has_section('Monitoring'):
-        heartbeat_path = cfg['Monitoring'].get('heartbeat_path', '/tmp/raspicam_heartbeat')
-        heartbeat_every_frames = cfg['Monitoring'].getint('heartbeat_every_frames', fallback=30)
-    else:
-        heartbeat_path = '/tmp/raspicam_heartbeat'
-        heartbeat_every_frames = 30
-    heartbeat_file = pathlib.Path(heartbeat_path)
-    heartbeat_counter = 0
+    last_frame_at = time.monotonic()
 
     filename = new_filename(tmp_dir)
     encoder  = H264Encoder(
@@ -161,9 +189,18 @@ def run_camera(cfg_path):
     while True:
         job = picam2.capture_buffer('lores', wait=False)
         if job is None:
+            # The camera can stop delivering frames while this process stays alive,
+            # so `systemctl is-active` keeps saying "active" and systemd never
+            # restarts us. Exit non-zero and let it. (A hang *inside* picam2.wait()
+            # never gets here — bb_monitor's system check kills that case remotely.)
+            if watchdog_seconds and time.monotonic() - last_frame_at > watchdog_seconds:
+                raise SystemExit(
+                    f"[watchdog] no frame for {watchdog_seconds}s; exiting for systemd restart"
+                )
             time.sleep(0.01)
             continue
         buf     = picam2.wait(job)
+        last_frame_at = time.monotonic()
         arr     = np.frombuffer(buf, np.uint8)
         y_plane = arr[:bg_w*bg_h].reshape((bg_h, bg_w))
 
@@ -175,10 +212,7 @@ def run_camera(cfg_path):
 
         heartbeat_counter += 1
         if heartbeat_counter >= heartbeat_every_frames:
-            try:
-                heartbeat_file.touch()
-            except OSError as e:
-                print(f"[heartbeat] touch failed: {e}")
+            touch_heartbeat()
             heartbeat_counter = 0
 
         # Frame count split
