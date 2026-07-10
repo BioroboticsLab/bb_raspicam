@@ -15,19 +15,35 @@ WORKINGDIR_IMGSTORAGE=$3
 TXFR_CFG_FILENAME=$4
 
 # Create systemd service file for raspicam
+#
+# Restart=always, not on-failure: systemd counts SIGTERM/SIGHUP/SIGINT/SIGPIPE as a
+# *clean* exit, so on-failure would leave the camera dead after anything sent it a
+# SIGTERM. StartLimitIntervalSec=0 disables the default "give up after 5 starts in
+# 10s", which would otherwise park a flapping camera in failed/start-limit-hit.
+#
+# The Pi has no RTC, so at boot the clock is whatever fake-hwclock saved and chrony
+# steps it forward once the network is up. chronyc waitsync holds the camera until
+# the clock is within 0.5s (10 tries, 3s apart = 30s cap, comfortably under the 90s
+# default TimeoutStartSec; the leading "-" lets it start anyway if the clock never
+# syncs) so that video filenames and heartbeat mtimes aren't stamped with a bogus
+# time. Without the explicit 3s interval chronyc polls every 10s and would block ~100s.
 RASPICAM_SERVICE=/etc/systemd/system/raspicam.service
 echo "Creating systemd service file for raspicam at $RASPICAM_SERVICE"
 sudo bash -c "cat > $RASPICAM_SERVICE" << EOF
 [Unit]
 Description=bb_raspicam
-After=network.target
+Wants=network-online.target chrony.service
+After=network-online.target chrony.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=pi
 WorkingDirectory=$WORKINGDIR_RASPICAM
+ExecStartPre=-/usr/bin/chronyc waitsync 10 0.5 0 3
 ExecStart=/usr/bin/python3 raspicam.py $RASPICAM_CFG_FILENAME
-Restart=on-failure
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
@@ -39,14 +55,17 @@ echo "Creating systemd service file for imgstorage at $IMGSTORAGE_SERVICE"
 sudo bash -c "cat > $IMGSTORAGE_SERVICE" << EOF
 [Unit]
 Description=bb_imgstorage_nfs
-After=network.target
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=pi
 WorkingDirectory=$WORKINGDIR_IMGSTORAGE
 ExecStart=/usr/bin/python3 imgstorage.py $TXFR_CFG_FILENAME
-Restart=on-failure
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
