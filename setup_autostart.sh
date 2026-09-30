@@ -13,6 +13,8 @@ WORKINGDIR_RASPICAM=$1
 RASPICAM_CFG_FILENAME=$2
 WORKINGDIR_IMGSTORAGE=$3
 TXFR_CFG_FILENAME=$4
+# Run the services as the user who invoked this script (also when it is run via sudo)
+SERVICE_USER=${SUDO_USER:-$(id -un)}
 
 # Create systemd service file for raspicam
 #
@@ -38,7 +40,7 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-User=pi
+User=$SERVICE_USER
 WorkingDirectory=$WORKINGDIR_RASPICAM
 ExecStartPre=-/usr/bin/chronyc waitsync 10 0.5 0 3
 ExecStart=/usr/bin/python3 raspicam.py $RASPICAM_CFG_FILENAME
@@ -61,7 +63,7 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-User=pi
+User=$SERVICE_USER
 WorkingDirectory=$WORKINGDIR_IMGSTORAGE
 ExecStart=/usr/bin/python3 imgstorage.py $TXFR_CFG_FILENAME
 Restart=always
